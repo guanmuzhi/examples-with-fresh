@@ -1,70 +1,52 @@
+// 不要import任何Fresh包！纯原生deno代码
 Deno.serve(async (req: Request) => {
-  const corsHeaders = {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "POST,OPTIONS",
-    "access-control-allow-headers": "Content-Type"
-  };
+  const corsHeaders = new Headers();
+  corsHeaders.set("Access-Control-Allow-Origin", "*");
+  corsHeaders.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  corsHeaders.set("Access-Control-Allow-Headers", "Content-Type");
 
-  if(req.method === "OPTIONS"){
-    return new Response(null, {headers:corsHeaders});
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
   }
 
   const url = new URL(req.url);
 
-  // 搜索接口 /api/search
+  //搜索接口
   if(url.pathname === "/api/search"){
-    try {
+    try{
       const body = await req.json();
-      const anysearchKey = Deno.env.get("ANYSEARCH_API_KEY");
-
-      if(!anysearchKey){
-        return Response.json({error:"ANYSEARCH_API_KEY环境变量未设置"}, {status:500, headers:corsHeaders});
-      }
-
-      const resp = await fetch("https://api.anysearch.com/v1/search",{
+      const key = Deno.env.get("ANYSEARCH_API_KEY");
+      if(!key) return Response.json({error:"缺少环境变量"},{status:500,headers:corsHeaders});
+      const res = await fetch("https://api.anysearch.com/v1/search",{
         method:"POST",
         headers:{
-          "Authorization":`Bearer ${anysearchKey}`,
+          "Authorization":`Bearer ${key}`,
           "Content-Type":"application/json"
         },
-        body:JSON.stringify({
-          query: body.query,
-          max_results: body.max_results ?? 3,
-          language: body.language ?? "zh-CN",
-          zone: body.zone ?? "cn"
-        })
-      });
-
-      const data = await resp.json();
-      return Response.json(data, {headers:corsHeaders});
-
-    } catch(err){
-      console.error("搜索接口异常", err);
-      return Response.json({error:String(err)}, {status:500, headers:corsHeaders});
+        body:JSON.stringify(body)
+      })
+      const data = await res.json();
+      return Response.json(data,{headers:corsHeaders});
+    }catch(e){
+      return Response.json({error:String(e)},{status:500,headers:corsHeaders});
     }
   }
 
-  // 原有大模型中转接口 /
-  if(req.method === "POST" && url.pathname === "/"){
-    try {
-      const payload = await req.json();
-      const {baseUrl, apiKey, ...rest} = payload;
-      const chatUrl = new URL("/v1/chat/completions", baseUrl);
-      const res = await fetch(chatUrl, {
-        method:"POST",
-        headers:{
-          "Authorization":`Bearer ${apiKey}`,
-          "Content-Type":"application/json"
-        },
-        body:JSON.stringify(rest)
-      });
-      const result = await res.json();
-      return Response.json(result, {headers:corsHeaders});
-    }catch(err){
-      console.error("LLM代理异常",err);
-      return Response.json({error:String(err)},{status:500,headers:corsHeaders})
-    }
+  //LLM中转接口
+  if(url.pathname === "/"){
+    const payload = await req.json();
+    const {baseUrl,apiKey,...rest} = payload;
+    const chatRes = await fetch(new URL("/v1/chat/completions",baseUrl),{
+      method:"POST",
+      headers:{
+        "Authorization":`Bearer ${apiKey}`,
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify(rest)
+    })
+    const llmData = await chatRes.json();
+    return Response.json(llmData,{headers:corsHeaders});
   }
 
-  return new Response("Not Found", {status:404, headers:corsHeaders});
+  return new Response("404",{status:404,headers:corsHeaders});
 })
